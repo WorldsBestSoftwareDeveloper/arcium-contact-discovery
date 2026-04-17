@@ -96,41 +96,50 @@ export function usePSI(): UsePSIReturn {
   );
 
   const runDiscovery = useCallback(
-  async (myRawContacts: string[], partnerRawContacts: string[]) => {
-    // ✅ FIX 3: Prevent duplicate runs
-    if (state.phase !== "idle" && state.phase !== "error") {
-      return;
-    }
+    async (myRawContacts: string[], partnerRawContacts: string[]) => {
+      // prevent duplicate runs
+      if (state.phase !== "idle" && state.phase !== "error") return;
 
-    if (!publicKey || !signTransaction) {
-      updateState({ phase: "error", error: "Wallet not connected" });
-      return;
-    }
+      if (!publicKey || !signTransaction) {
+        updateState({ phase: "error", error: "Wallet not connected" });
+        return;
+      }
+
       const walletAddress = publicKey.toBase58();
 
       try {
-        // Step 0: Sign on-chain session memo
+        // reset session state
         updateState({
           phase: "signing",
           error: null,
           matches: [],
           sessionSignature: null,
-          jobId: null,          // ✅ reset
-          computeStatus: null,  // ✅ reset
+          jobId: null,
+          computeStatus: null,
         });
 
-    const encoder = new TextEncoder();
-  const data = encoder.encode(myRawContacts.sort().join(","));
+        // -----------------------------
+        // FIXED CRYPTO FINGERPRINT (Vercel-safe)
+        // -----------------------------
+        const encoder = new TextEncoder();
+        const data = encoder.encode(
+          myRawContacts.sort().join(",")
+        );
 
-  const contactFingerprint = await crypto.subtle.digest(
-  "SHA-256",
-  data.buffer.slice(0)
-);
+        const buffer = new Uint8Array(data).slice().buffer;
 
-  const fingerprintHex = Array.from(new Uint8Array(contactFingerprint))
-  .map((b) => b.toString(16).padStart(2, "0"))
-  .join("");
+        const contactFingerprint = await crypto.subtle.digest(
+          "SHA-256",
+          buffer
+        );
 
+        const fingerprintHex = Array.from(
+          new Uint8Array(contactFingerprint)
+        )
+          .map((b) => b.toString(16).padStart(2, "0"))
+          .join("");
+
+        // sign session on-chain
         const sessionSignature = await signSessionOnChain(
           publicKey,
           signTransaction,
@@ -139,7 +148,7 @@ export function usePSI(): UsePSIReturn {
 
         updateState({ sessionSignature });
 
-        // Step 1: Normalize + hash contacts client-side
+        // Step 1: Normalize + hash contacts
         updateState({ phase: "processing" });
 
         const [myProcessed, partnerProcessed] = await Promise.all([
@@ -149,15 +158,18 @@ export function usePSI(): UsePSIReturn {
 
         updateState({ processed: myProcessed });
 
-        // Step 2: Encrypt both hash sets with Arcium
+        // Step 2: Encrypt
         updateState({ phase: "encrypting" });
 
         const [myEncrypted, partnerEncrypted] = await Promise.all([
           encryptContactHashes(myProcessed.hashes, walletAddress),
-          encryptContactHashes(partnerProcessed.hashes, "demo-partner-key"),
+          encryptContactHashes(
+            partnerProcessed.hashes,
+            "demo-partner-key"
+          ),
         ]);
 
-        // Step 3: Submit PSI compute job to Arcium
+        // Step 3: Submit PSI job
         updateState({ phase: "computing" });
 
         const jobId = await submitPSIJob({
@@ -173,14 +185,14 @@ export function usePSI(): UsePSIReturn {
 
         updateState({ jobId });
 
-        // Step 4: Poll Arcium until result is ready
+        // Step 4: Poll result
         const matchedHashes = await waitForPSIResult(
           jobId,
           (status) => updateState({ computeStatus: status }),
           30
         );
 
-        // Step 5: Map matched hashes back to original contacts
+        // Step 5: Resolve matches
         updateState({ phase: "resolving" });
 
         const matches = resolveMatchedContacts(
@@ -209,7 +221,7 @@ export function usePSI(): UsePSIReturn {
         updateState({ phase: "error", error: message });
       }
     },
-    [publicKey, signTransaction, updateState]
+    [publicKey, signTransaction, updateState, state.phase]
   );
 
   const reset = useCallback(() => {
