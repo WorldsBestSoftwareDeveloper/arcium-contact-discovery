@@ -119,13 +119,17 @@ export function usePSI(): UsePSIReturn {
           computeStatus: null,  // ✅ reset
         });
 
-        const contactFingerprint = await crypto.subtle.digest(
-          "SHA-256",
-          new TextEncoder().encode(myRawContacts.sort().join(","))
-        );
-        const fingerprintHex = Array.from(new Uint8Array(contactFingerprint))
-          .map((b) => b.toString(16).padStart(2, "0"))
-          .join("");
+    const encoder = new TextEncoder();
+  const data = encoder.encode(myRawContacts.sort().join(","));
+
+  const contactFingerprint = await crypto.subtle.digest(
+  "SHA-256",
+  data.buffer.slice(0)
+);
+
+  const fingerprintHex = Array.from(new Uint8Array(contactFingerprint))
+  .map((b) => b.toString(16).padStart(2, "0"))
+  .join("");
 
         const sessionSignature = await signSessionOnChain(
           publicKey,
