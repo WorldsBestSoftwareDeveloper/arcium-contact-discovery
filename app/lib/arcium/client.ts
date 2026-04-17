@@ -80,7 +80,7 @@ export function usePSI() {
         });
 
         // =========================================================
-        // ✅ FIXED FINGERPRINT (100% TS + WebCrypto safe)
+        // FIXED FINGERPRINT (TypeScript + WebCrypto safe)
         // =========================================================
         const encoder = new TextEncoder();
 
@@ -92,6 +92,8 @@ export function usePSI() {
 
         const data = encoder.encode(normalized);
 
+        // IMPORTANT FIX:
+        // crypto.subtle.digest expects BufferSource = Uint8Array or ArrayBuffer
         const hashBuffer = await crypto.subtle.digest("SHA-256", data);
 
         const fingerprintHex = Array.from(new Uint8Array(hashBuffer))
@@ -106,9 +108,7 @@ export function usePSI() {
 
         updateState({ sessionSignature });
 
-        // =========================================================
         // Step 1: Process contacts
-        // =========================================================
         updateState({ phase: "processing" });
 
         const [myProcessed, partnerProcessed] = await Promise.all([
@@ -118,9 +118,7 @@ export function usePSI() {
 
         updateState({ processed: myProcessed });
 
-        // =========================================================
         // Step 2: Encrypt
-        // =========================================================
         updateState({ phase: "encrypting" });
 
         const [myEncrypted, partnerEncrypted] = await Promise.all([
@@ -128,9 +126,7 @@ export function usePSI() {
           encryptContactHashes(partnerProcessed.hashes, "demo-partner-key"),
         ]);
 
-        // =========================================================
         // Step 3: Submit PSI job
-        // =========================================================
         updateState({ phase: "computing" });
 
         const jobId = await submitPSIJob({
@@ -146,18 +142,14 @@ export function usePSI() {
 
         updateState({ jobId });
 
-        // =========================================================
         // Step 4: Poll results
-        // =========================================================
         const matchedHashes = await waitForPSIResult(
           jobId,
           (status) => updateState({ computeStatus: status }),
           30
         );
 
-        // =========================================================
         // Step 5: Resolve matches
-        // =========================================================
         updateState({ phase: "resolving" });
 
         const matches = resolveMatchedContacts(
