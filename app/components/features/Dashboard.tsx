@@ -31,11 +31,6 @@ export default function Dashboard() {
     partnerContacts.length > 0 &&
     state.phase === "idle";
 
-  const isRunning =
-    state.phase !== "idle" &&
-    state.phase !== "done" &&
-    state.phase !== "error";
-
   const handleRun = () => {
     runDiscovery(myContacts, partnerContacts);
   };
@@ -47,10 +42,7 @@ export default function Dashboard() {
   };
 
   return (
-    <section
-      id="dashboard"
-      className="min-h-screen py-24 px-4 relative"
-    >
+    <section id="dashboard" className="min-h-screen py-24 px-4 relative">
       <div className="max-w-5xl mx-auto space-y-8">
         {/* Section header */}
         <div className="text-center">
@@ -94,7 +86,7 @@ export default function Dashboard() {
             processed={state.processed}
             isProcessing={state.phase === "processing"}
             onContactsChange={setMyContacts}
-            onProcess={(contacts) => processOnly(contacts)}
+            onProcess={() => {}}
           />
 
           <ContactInput
@@ -131,35 +123,35 @@ export default function Dashboard() {
               </p>
               <div className="flex flex-wrap gap-2">
                 <button
-                  onClick={() => {
-                    const sampleA = [
+                  onClick={() =>
+                    setMyContacts([
                       "alice@example.com",
                       "bob@gmail.com",
                       "+14155552671",
                       "carol@web3.io",
                       "dave@test.com",
-                    ];
-                    setMyContacts(sampleA);
-                  }}
+                    ])
+                  }
                   className="px-3 py-1.5 rounded-lg bg-arcium-surface border border-arcium-border text-xs text-arcium-text hover:border-arcium-purple/40 transition-colors"
                 >
                   Load My Sample (5)
                 </button>
+
                 <button
-                  onClick={() => {
-                    const sampleB = [
+                  onClick={() =>
+                    setPartnerContacts([
                       "bob@gmail.com",
                       "carol@web3.io",
                       "frank@example.com",
                       "+14155559999",
                       "grace@solana.dev",
-                    ];
-                    setPartnerContacts(sampleB);
-                  }}
+                    ])
+                  }
                   className="px-3 py-1.5 rounded-lg bg-arcium-surface border border-arcium-border text-xs text-arcium-text hover:border-arcium-purple/40 transition-colors"
                 >
                   Load Partner Sample (5)
                 </button>
+
                 <button
                   onClick={() => {
                     setMyContacts([
@@ -186,7 +178,7 @@ export default function Dashboard() {
           )}
         </div>
 
-        {/* Error display */}
+        {/* Error */}
         {state.phase === "error" && state.error && (
           <div className="flex items-start gap-3 p-4 rounded-xl bg-red-900/10 border border-red-500/30">
             <AlertCircle className="w-5 h-5 text-red-400 flex-shrink-0 mt-0.5" />
@@ -194,7 +186,9 @@ export default function Dashboard() {
               <div className="text-sm font-medium text-red-400">
                 Computation failed
               </div>
-              <div className="text-xs text-red-400/70 mt-1">{state.error}</div>
+              <div className="text-xs text-red-400/70 mt-1">
+                {state.error}
+              </div>
               <button
                 onClick={handleReset}
                 className="mt-2 text-xs text-red-400 hover:underline"
@@ -239,16 +233,6 @@ export default function Dashboard() {
             >
               <Search className="w-5 h-5" />
               Find Matches Privately
-              {!connected && (
-                <span className="text-xs font-body font-normal opacity-70">
-                  (connect wallet first)
-                </span>
-              )}
-              {connected && myContacts.length === 0 && (
-                <span className="text-xs font-body font-normal opacity-70">
-                  (add contacts)
-                </span>
-              )}
             </button>
           </div>
         )}
