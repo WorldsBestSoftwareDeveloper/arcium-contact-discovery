@@ -94,17 +94,22 @@ export async function sha256(input: string): Promise<string> {
   const encoder = new TextEncoder();
   const data = encoder.encode(input);
 
-  // ✅ FORCE a real ArrayBuffer (fixes Vercel + TS permanently)
+  // ✅ Create a guaranteed ArrayBuffer
   const buffer = data.buffer.slice(
     data.byteOffset,
     data.byteOffset + data.byteLength
-  );
+  ) as ArrayBuffer;
 
-  const hashBuffer = await cryptoObj.subtle.digest("SHA-256", buffer);
+  // ✅ Explicitly satisfy TS
+  const hashBuffer = await cryptoObj.subtle.digest(
+    "SHA-256",
+    buffer as BufferSource
+  );
 
   const hashArray = Array.from(new Uint8Array(hashBuffer));
   return hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
 }
+
 export async function hashContact(normalized: string): Promise<string> {
   return sha256(normalized);
 }
