@@ -1,190 +1,109 @@
 "use client";
 
-import { useState, useCallback } from "react";
-import { useWallet } from "@solana/wallet-adapter-react";
-import {
-  processContacts,
-  resolveMatchedContacts,
-  type Contact,
-  type ProcessedContacts,
-} from "@/app/lib/utils/contacts";
-import {
-  encryptContactHashes,
-  submitPSIJob,
-  waitForPSIResult,
-  type PSIJobStatus,
-  ArciumError,
-} from "@/app/lib/arcium/client";
-import {
-  signSessionOnChain,
-  type SessionSignatureResult,
-} from "@/app/lib/solana/session";
+// ==============================
+// TYPES
+// ==============================
 
-export type PSIPhase =
-  | "idle"
-  | "signing"
-  | "processing"
-  | "encrypting"
-  | "computing"
-  | "resolving"
-  | "done"
-  | "error";
-
-export interface PSIState {
-  phase: PSIPhase;
-  processed: ProcessedContacts | null;
-  jobId: string | null;
-  computeStatus: PSIJobStatus | null;
-  matches: Contact[];
-  sessionSignature: SessionSignatureResult | null;
-  error: string | null;
-}
-
-const initialState: PSIState = {
-  phase: "idle",
-  processed: null,
-  jobId: null,
-  computeStatus: null,
-  matches: [],
-  sessionSignature: null,
-  error: null,
+export type PSIJobStatus = {
+  jobId: string;
+  status: "pending" | "running" | "completed" | "failed";
+  progress: number;
+  result?: string[];
 };
 
-export function usePSI() {
-  const { publicKey, signTransaction } = useWallet();
-  const [state, setState] = useState<PSIState>(initialState);
+export class ArciumError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ArciumError";
+  }
+}
 
-  const updateState = useCallback((updates: Partial<PSIState>) => {
-    setState((prev) => ({ ...prev, ...updates }));
-  }, []);
+// ==============================
+// MOCK STORE (for demo PSI)
+// ==============================
 
-  const runDiscovery = useCallback(
-    async (myRawContacts: string[], partnerRawContacts: string[]) => {
-      if (state.phase !== "idle" && state.phase !== "error") return;
+const demoJobStore: Record<string, string[]> = {};
 
-      if (!publicKey || !signTransaction) {
-        updateState({ phase: "error", error: "Wallet not connected" });
-        return;
-      }
+// ==============================
+// ENCRYPT
+// ==============================
 
-      const walletAddress = publicKey.toBase58();
+export async function encryptContactHashes(
+  hashes: string[],
+  publicKey: string
+): Promise<{
+  encryptedHashes: string[];
+  publicKey: string;
+}> {
+  if (!hashes || hashes.length === 0) {
+    throw new ArciumError("No hashes provided");
+  }
 
-      try {
-        updateState({
-          phase: "signing",
-          error: null,
-          matches: [],
-          sessionSignature: null,
-          jobId: null,
-          computeStatus: null,
-        });
+  const encryptedHashes = hashes.map((h) => `enc::${h}`);
 
-        // =========================================================
-        // FIXED FINGERPRINT (TypeScript + WebCrypto safe)
-        // =========================================================
-        const encoder = new TextEncoder();
+  return {
+    encryptedHashes,
+    publicKey,
+  };
+}
 
-        const normalized = [...myRawContacts]
-          .filter(Boolean)
-          .map((c) => c.trim().toLowerCase())
-          .sort()
-          .join(",");
+// ==============================
+// SUBMIT JOB
+// ==============================
 
-        const data = encoder.encode(normalized);
+export async function submitPSIJob(input: {
+  partyA: { encryptedHashes: string[]; publicKey: string };
+  partyB: { encryptedHashes: string[]; publicKey: string };
+}): Promise<string> {
+  const jobId = `psi-${Date.now()}`;
 
-        // IMPORTANT FIX:
-        // crypto.subtle.digest expects BufferSource = Uint8Array or ArrayBuffer
-        const hashBuffer = await crypto.subtle.digest("SHA-256", data);
+  const setA = new Set(input.partyA.encryptedHashes);
+  const setB = new Set(input.partyB.encryptedHashes);
 
-        const fingerprintHex = Array.from(new Uint8Array(hashBuffer))
-          .map((b) => b.toString(16).padStart(2, "0"))
-          .join("");
+  // ✅ FIX: no spread operator on Set (avoids TS build error)
+  const intersection: string[] = [];
 
-        const sessionSignature = await signSessionOnChain(
-          publicKey,
-          signTransaction,
-          fingerprintHex
-        );
+  setA.forEach((value) => {
+    if (setB.has(value)) {
+      intersection.push(value);
+    }
+  });
 
-        updateState({ sessionSignature });
+  demoJobStore[jobId] = intersection;
 
-        // Step 1: Process contacts
-        updateState({ phase: "processing" });
+  return jobId;
+}
 
-        const [myProcessed, partnerProcessed] = await Promise.all([
-          processContacts(myRawContacts),
-          processContacts(partnerRawContacts),
-        ]);
+// ==============================
+// WAIT FOR RESULT
+// ==============================
 
-        updateState({ processed: myProcessed });
+export async function waitForPSIResult(
+  jobId: string,
+  onUpdate?: (status: PSIJobStatus) => void,
+  timeoutSeconds = 30
+): Promise<string[]> {
+  let elapsed = 0;
 
-        // Step 2: Encrypt
-        updateState({ phase: "encrypting" });
+  while (elapsed < timeoutSeconds) {
+    const result = demoJobStore[jobId];
 
-        const [myEncrypted, partnerEncrypted] = await Promise.all([
-          encryptContactHashes(myProcessed.hashes, walletAddress),
-          encryptContactHashes(partnerProcessed.hashes, "demo-partner-key"),
-        ]);
+    const status: PSIJobStatus = {
+      jobId,
+      status: result ? "completed" : "running",
+      progress: result ? 100 : Math.min(elapsed * 10, 90),
+      result,
+    };
 
-        // Step 3: Submit PSI job
-        updateState({ phase: "computing" });
+    if (onUpdate) onUpdate(status);
 
-        const jobId = await submitPSIJob({
-          partyA: {
-            encryptedHashes: myEncrypted.encryptedHashes,
-            publicKey: myEncrypted.publicKey,
-          },
-          partyB: {
-            encryptedHashes: partnerEncrypted.encryptedHashes,
-            publicKey: partnerEncrypted.publicKey,
-          },
-        });
+    if (result) {
+      return result;
+    }
 
-        updateState({ jobId });
+    await new Promise((r) => setTimeout(r, 1000));
+    elapsed++;
+  }
 
-        // Step 4: Poll results
-        const matchedHashes = await waitForPSIResult(
-          jobId,
-          (status) => updateState({ computeStatus: status }),
-          30
-        );
-
-        // Step 5: Resolve matches
-        updateState({ phase: "resolving" });
-
-        const matches = resolveMatchedContacts(
-          myProcessed.contacts,
-          matchedHashes
-        );
-
-        updateState({
-          phase: "done",
-          matches,
-          computeStatus: {
-            jobId,
-            status: "completed",
-            result: matchedHashes,
-            progress: 100,
-          },
-        });
-      } catch (err) {
-        updateState({
-          phase: "error",
-          error:
-            err instanceof ArciumError
-              ? `Arcium: ${err.message}`
-              : err instanceof Error
-              ? err.message
-              : "Unknown error",
-        });
-      }
-    },
-    [publicKey, signTransaction, state.phase, updateState]
-  );
-
-  const reset = useCallback(() => {
-    setState(initialState);
-  }, []);
-
-  return { state, runDiscovery, reset };
+  throw new ArciumError("PSI job timed out");
 }
