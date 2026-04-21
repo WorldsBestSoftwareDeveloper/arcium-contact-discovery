@@ -88,7 +88,7 @@ export function usePSI() {
 
         const contactFingerprint = await crypto.subtle.digest(
           "SHA-256",
-          data.buffer.slice(0)
+          data
         );
 
         const fingerprintHex = Array.from(new Uint8Array(contactFingerprint))
