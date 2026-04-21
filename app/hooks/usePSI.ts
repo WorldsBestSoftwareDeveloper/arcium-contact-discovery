@@ -20,6 +20,8 @@ import {
   type SessionSignatureResult,
 } from "@/app/lib/solana/session";
 
+// ─── Types ────────────────────────────────────────────────────────────────────
+
 export type PSIPhase =
   | "idle"
   | "signing"
@@ -40,6 +42,15 @@ export interface PSIState {
   error: string | null;
 }
 
+export interface UsePSIReturn {
+  state: PSIState;
+  runDiscovery: (myRaw: string[], partnerRaw: string[]) => Promise<void>;
+  processOnly: (raw: string[]) => Promise<void>;
+  reset: () => void;
+}
+
+// ─── Initial state ────────────────────────────────────────────────────────────
+
 const initialState: PSIState = {
   phase: "idle",
   processed: null,
@@ -50,7 +61,9 @@ const initialState: PSIState = {
   error: null,
 };
 
-export function usePSI() {
+// ─── Hook ─────────────────────────────────────────────────────────────────────
+
+export function usePSI(): UsePSIReturn {
   const { publicKey, signTransaction } = useWallet();
   const [state, setState] = useState<PSIState>(initialState);
 
@@ -58,10 +71,26 @@ export function usePSI() {
     setState((prev) => ({ ...prev, ...updates }));
   }, []);
 
-  const runDiscovery = useCallback(
-    async (myRawContacts: string[], partnerRawContacts: string[]) => {
-      if (state.phase !== "idle" && state.phase !== "error") return;
+  // Hash-only preview (no compute)
+  const processOnly = useCallback(
+    async (raw: string[]) => {
+      updateState({ phase: "processing", error: null });
+      try {
+        const processed = await processContacts(raw);
+        updateState({ processed, phase: "idle" });
+      } catch (err) {
+        updateState({
+          phase: "error",
+          error: err instanceof Error ? err.message : "Processing failed",
+        });
+      }
+    },
+    [updateState]
+  );
 
+  // Full PSI flow
+  const runDiscovery = useCallback(
+    async (myRaw: string[], partnerRaw: string[]) => {
       if (!publicKey || !signTransaction) {
         updateState({ phase: "error", error: "Wallet not connected" });
         return;
@@ -70,6 +99,7 @@ export function usePSI() {
       const walletAddress = publicKey.toBase58();
 
       try {
+        // ── 0. Sign on-chain session memo ─────────────────────────────────────
         updateState({
           phase: "signing",
           error: null,
@@ -79,19 +109,17 @@ export function usePSI() {
           computeStatus: null,
         });
 
-        // ==============================
-        // FIXED CRYPTO DIGEST (IMPORTANT)
-        // ==============================
         const encoder = new TextEncoder();
-        const sorted = [...myRawContacts].sort().join(",");
-        const data = encoder.encode(sorted);
+        const sortedRaw = [...myRaw].sort().join(",");
+        const encoded = encoder.encode(sortedRaw);
+        // Explicit ArrayBuffer slice to satisfy strict TS / Vercel build
+        const buffer = encoded.buffer.slice(
+          encoded.byteOffset,
+          encoded.byteOffset + encoded.byteLength
+        ) as ArrayBuffer;
 
-        const contactFingerprint = await crypto.subtle.digest(
-          "SHA-256",
-          new Uint8Array(data).buffer
-        );
-
-        const fingerprintHex = Array.from(new Uint8Array(contactFingerprint))
+        const fingerprintBuffer = await crypto.subtle.digest("SHA-256", buffer);
+        const fingerprintHex = Array.from(new Uint8Array(fingerprintBuffer))
           .map((b) => b.toString(16).padStart(2, "0"))
           .join("");
 
@@ -101,20 +129,27 @@ export function usePSI() {
           fingerprintHex
         );
 
-        updateState({ sessionSignature, phase: "processing" });
+        updateState({ sessionSignature });
+
+        // ── 1. Normalize + hash contacts client-side ──────────────────────────
+        updateState({ phase: "processing" });
 
         const [myProcessed, partnerProcessed] = await Promise.all([
-          processContacts(myRawContacts),
-          processContacts(partnerRawContacts),
+          processContacts(myRaw),
+          processContacts(partnerRaw),
         ]);
 
-        updateState({ processed: myProcessed, phase: "encrypting" });
+        updateState({ processed: myProcessed });
+
+        // ── 2. Encrypt both hash sets ─────────────────────────────────────────
+        updateState({ phase: "encrypting" });
 
         const [myEncrypted, partnerEncrypted] = await Promise.all([
           encryptContactHashes(myProcessed.hashes, walletAddress),
-          encryptContactHashes(partnerProcessed.hashes, "demo-partner-key"),
+          encryptContactHashes(partnerProcessed.hashes, "partner-pubkey"),
         ]);
 
+        // ── 3. Submit PSI compute job ─────────────────────────────────────────
         updateState({ phase: "computing" });
 
         const jobId = await submitPSIJob({
@@ -130,12 +165,15 @@ export function usePSI() {
 
         updateState({ jobId });
 
+        // ── 4. Poll for result ────────────────────────────────────────────────
+        // matchedHashes are raw SHA-256 hashes (prefix already stripped in submitPSIJob)
         const matchedHashes = await waitForPSIResult(
           jobId,
           (status) => updateState({ computeStatus: status }),
           30
         );
 
+        // ── 5. Resolve hashes → Contact objects ───────────────────────────────
         updateState({ phase: "resolving" });
 
         const matches = resolveMatchedContacts(
@@ -161,16 +199,14 @@ export function usePSI() {
               ? `Arcium: ${err.message}`
               : err instanceof Error
               ? err.message
-              : "Unknown error",
+              : "Unknown error occurred",
         });
       }
     },
-    [publicKey, signTransaction, state.phase]
+    [publicKey, signTransaction, updateState]
   );
 
-  const reset = useCallback(() => {
-    setState(initialState);
-  }, []);
+  const reset = useCallback(() => setState(initialState), []);
 
-  return { state, runDiscovery, reset };
+  return { state, runDiscovery, processOnly, reset };
 }
