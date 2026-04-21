@@ -19,7 +19,7 @@ import MatchResults from "./MatchResults";
 export default function Dashboard() {
   const { connected, publicKey } = useWallet();
   const { setVisible } = useWalletModal();
-  const { state, runDiscovery, processOnly, reset } = usePSI();
+  const { state, runDiscovery, reset } = usePSI();
 
   const [myContacts, setMyContacts] = useState<string[]>([]);
   const [partnerContacts, setPartnerContacts] = useState<string[]>([]);
