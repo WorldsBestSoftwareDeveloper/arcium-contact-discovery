@@ -79,14 +79,16 @@ export function usePSI() {
           computeStatus: null,
         });
 
-        // ✅ FIXED FINGERPRINT (NO buffer, NO SharedArrayBuffer issues)
+        // ==============================
+        // FIXED CRYPTO DIGEST (IMPORTANT)
+        // ==============================
         const encoder = new TextEncoder();
         const sorted = [...myRawContacts].sort().join(",");
         const data = encoder.encode(sorted);
 
         const contactFingerprint = await crypto.subtle.digest(
           "SHA-256",
-          data
+          data.buffer.slice(0)
         );
 
         const fingerprintHex = Array.from(new Uint8Array(contactFingerprint))
@@ -99,18 +101,14 @@ export function usePSI() {
           fingerprintHex
         );
 
-        updateState({ sessionSignature });
-
-        updateState({ phase: "processing" });
+        updateState({ sessionSignature, phase: "processing" });
 
         const [myProcessed, partnerProcessed] = await Promise.all([
           processContacts(myRawContacts),
           processContacts(partnerRawContacts),
         ]);
 
-        updateState({ processed: myProcessed });
-
-        updateState({ phase: "encrypting" });
+        updateState({ processed: myProcessed, phase: "encrypting" });
 
         const [myEncrypted, partnerEncrypted] = await Promise.all([
           encryptContactHashes(myProcessed.hashes, walletAddress),
