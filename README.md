@@ -5,7 +5,7 @@
 
 ---
 
-Web url ==> privfind.vercel.app
+Web url ==> https://privfind.vercel.app/
 video ==> https://youtu.be/6n2jNNnMeU0?si=saStkNj4iVr8JIu2
 ## Overview
 
