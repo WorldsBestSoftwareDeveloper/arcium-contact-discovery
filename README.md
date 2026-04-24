@@ -5,6 +5,8 @@
 
 ---
 
+Web url ==> privfind.vercel.app
+video ==> https://youtu.be/6n2jNNnMeU0?si=saStkNj4iVr8JIu2
 ## Overview
 
 PrivFind is a privacy-preserving contact discovery app built with:
